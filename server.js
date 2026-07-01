@@ -27,27 +27,26 @@ let processingState = {
 
 // ==================== עיבוד הנתונים ====================
 
-async function generateMissingWords(categories, existingWords, totalWords = 800) {
-  const missingCount = totalWords - existingWords.length;
+async function completeCategoryWords(categoryName, existingWords, targetCount = 100) {
+  const missingCount = targetCount - existingWords.length;
 
   if (missingCount <= 0) {
-    return existingWords.slice(0, totalWords);
+    return existingWords.slice(0, targetCount);
   }
 
-  const categoriesStr = categories.join(', ');
-  const wordsStr = existingWords.slice(0, 50).join(', ');
+  const wordsStr = existingWords.slice(0, 30).join(', ');
 
   const prompt = `אתה עוזר ליצור מילים למשחק קופסה גדודי.
 
-הקטגוריות הן: ${categoriesStr}
+הקטגוריה: ${categoryName}
 
-המילים שכבר יש: ${wordsStr}... (ועוד)
+המילים שכבר יש: ${wordsStr}${existingWords.length > 30 ? '... (ועוד)' : ''}
 
-צור לי ${missingCount} מילים חדשות שלא חוזרות על עצמן, קשורות לקטגוריות האלה.
+צור לי ${missingCount} מילים חדשות שלא חוזרות על עצמן, קשורות לקטגוריה "${categoryName}".
 המילים צריכות להיות:
 - בעברית
 - קצרות (מילה או שתיים)
-- רלוונטיות לגדוד/חיים/משפחה
+- רלוונטיות לקטגוריה
 - מגוונות
 
 החזר רק רשימה של מילים, מופרדות בשורה חדשה. ללא מספורים, ללא הסברים.`;
@@ -61,7 +60,7 @@ async function generateMissingWords(categories, existingWords, totalWords = 800)
     .filter(w => w.length > 0 && !existingWords.includes(w))
     .slice(0, missingCount);
 
-  return [...existingWords, ...newWords].slice(0, totalWords);
+  return [...existingWords, ...newWords].slice(0, targetCount);
 }
 
 async function extractQuestionsFromStories(stories, numQuestions = 48) {
@@ -111,11 +110,26 @@ function readCellsFromSheet(sheet) {
   return rows;
 }
 
-function readExcelFile(buffer) {
+// קורא קובץ מילים לפי קטגוריות — שורה ראשונה = שמות קטגוריות, שאר השורות = מילים
+function readWordsFileByCategory(buffer) {
   const workbook = xlsx.read(buffer, { type: 'buffer', cellFormula: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rows = readCellsFromSheet(sheet);
-  return rows.flat().filter(cell => cell.length > 0);
+
+  if (rows.length < 1) return {};
+
+  const headers = rows[0]; // שורה ראשונה = שמות קטגוריות
+  const result = {};
+
+  headers.forEach((header, colIdx) => {
+    if (!header.trim()) return;
+    const words = rows.slice(1)
+      .map(row => (row[colIdx] || '').trim())
+      .filter(w => w.length > 0);
+    result[header] = words;
+  });
+
+  return result;
 }
 
 function readStoriesFile(buffer) {
@@ -137,31 +151,38 @@ function readStoriesFile(buffer) {
 
 // ==================== יצוא Excel ====================
 
-function createExcelFile(words, questions, metadata) {
+function createExcelFile(categoryWords, questions, metadata) {
   const wb = xlsx.utils.book_new();
 
-  const basicAOA = [
-    ['קלף #', 'מילה', 'קטגוריה'],
-    ...words.map((word, idx) => [idx + 1, word, '(עיצוב בעיצובנית)'])
-  ];
+  // גיליון קלפים בסיסיים — עמודה לכל קטגוריה
+  const categoryNames = Object.keys(categoryWords);
+  const maxWords = Math.max(...categoryNames.map(cat => categoryWords[cat].length), 0);
+
+  const basicAOA = [categoryNames];
+  for (let r = 0; r < maxWords; r++) {
+    const row = categoryNames.map(cat => categoryWords[cat][r] || '');
+    basicAOA.push(row);
+  }
   xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(basicAOA), 'קלפים בסיסיים');
 
+  // גיליון קלפי סיפור
   const storyAOA = [
     ['קלף #', 'שאלה', 'פלוגה'],
     ...questions.map((q, idx) => [idx + 1, q, metadata.companies[idx % metadata.companies.length] || 'מחולק'])
   ];
   xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(storyAOA), 'קלפי סיפור');
 
+  const totalWords = categoryNames.reduce((sum, cat) => sum + categoryWords[cat].length, 0);
+
   const metaAOA = [
     ['שם המשחק:', metadata.gameName],
     ['סלוגן:', metadata.slogan],
     ['שם קלפי סיפור:', metadata.storyCardName],
     ['שם קלפי אזרחות:', metadata.civilianCardName],
-    ['כמות מילים סה״כ:', words.length],
+    ['כמות מילים סה״כ:', totalWords],
     ['כמות שאלות:', questions.length],
     ['כמות פלוגות:', metadata.companies.length],
-    ['תאריך יצוא:', new Date().toLocaleDateString('he-IL')],
-    ['קטגוריות (למידע בלבד):', metadata.categories.join(', ')]
+    ['תאריך יצוא:', new Date().toLocaleDateString('he-IL')]
   ];
   xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(metaAOA), 'מטא-נתונים');
 
@@ -184,12 +205,12 @@ app.post('/api/process', upload.fields([
     const categoriesList = JSON.parse(categories || '[]');
     const companiesList = JSON.parse(companies || '[]');
 
-    let words = [];
+    let wordsByCategory = {};
     let stories = [];
 
     try {
       if (req.files.wordsFile) {
-        words = readExcelFile(req.files.wordsFile[0].buffer);
+        wordsByCategory = readWordsFileByCategory(req.files.wordsFile[0].buffer);
       }
     } catch (e) {
       console.error('Error reading words file:', e.message);
@@ -203,6 +224,13 @@ app.post('/api/process', upload.fields([
       console.error('Error reading stories file:', e.message);
     }
 
+    // אם אין קטגוריות מהקובץ — משתמשים בקטגוריות מהטופס
+    if (Object.keys(wordsByCategory).length === 0) {
+      categoriesList.forEach(cat => {
+        if (cat) wordsByCategory[cat] = [];
+      });
+    }
+
     processingState = { status: 'processing', error: null, wordCount: 0, storyCount: 0, filename: null };
 
     // מחזיר מיד — לא מחכה לסיום
@@ -211,14 +239,18 @@ app.post('/api/process', upload.fields([
     // עיבוד ברקע
     (async () => {
       try {
-        console.log('🤖 Gemini עובד על המילים...');
-        const allWords = await generateMissingWords(categoriesList, words, 800);
+        console.log('🤖 Gemini עובד על המילים לפי קטגוריות...');
+        const categoryWords = {};
+        for (const [catName, existingWords] of Object.entries(wordsByCategory)) {
+          console.log(`  קטגוריה: ${catName} (${existingWords.length} מילים קיימות)`);
+          categoryWords[catName] = await completeCategoryWords(catName, existingWords, 100);
+        }
 
         console.log('🤖 Gemini עובד על השאלות...');
         const allQuestions = await extractQuestionsFromStories(stories, 48);
 
         console.log('📊 יוצר Excel...');
-        const excelBuffer = createExcelFile(allWords, allQuestions, {
+        const excelBuffer = createExcelFile(categoryWords, allQuestions, {
           gameName, slogan, storyCardName, civilianCardName,
           categories: categoriesList, companies: companiesList
         });
@@ -226,10 +258,12 @@ app.post('/api/process', upload.fields([
         const filename = `game-${Date.now()}.xlsx`;
         fs.writeFileSync(`/tmp/${filename}`, excelBuffer);
 
+        const totalWords = Object.values(categoryWords).reduce((sum, arr) => sum + arr.length, 0);
+
         processingState = {
           status: 'done',
           error: null,
-          wordCount: allWords.length,
+          wordCount: totalWords,
           storyCount: stories.length,
           filename
         };
