@@ -105,7 +105,7 @@ function readExcelFile(buffer, sheetName = 0) {
   try {
     const workbook = xlsx.read(buffer, { type: 'buffer' });
     const sheet = workbook.Sheets[workbook.SheetNames[sheetName]];
-    const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+    const data = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
     
     return data.flat().filter(cell => cell && String(cell).trim().length > 0);
   } catch (error) {
