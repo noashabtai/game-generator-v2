@@ -47,7 +47,7 @@ async function generateMissingWords(categories, existingWords, totalWords = 800)
 
 החזר רק רשימה של מילים, מופרדות בשורה חדשה. ללא מספורים, ללא הסברים.`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }, { apiVersion: 'v1beta' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }, { apiVersion: 'v1beta' });
     const result = await model.generateContent(prompt);
     const generatedText = result.response.text();
 
@@ -83,7 +83,7 @@ ${storiesText}
 
 החזר רק רשימה של שאלות, מופרדות בשורה חדשה. ללא מספורים.`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' }, { apiVersion: 'v1beta' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' }, { apiVersion: 'v1beta' });
     const result = await model.generateContent(prompt);
     const generatedText = result.response.text();
 
