@@ -95,27 +95,43 @@ ${storiesText}
 
 // ==================== קריאת קבצים ====================
 
+function readCellsFromSheet(sheet) {
+  const ref = sheet['!ref'];
+  if (!ref) return [];
+  const range = xlsx.utils.decode_range(ref);
+  const rows = [];
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = sheet[xlsx.utils.encode_cell({ r, c })];
+      row.push(cell && cell.v !== undefined ? String(cell.v).trim() : '');
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 function readExcelFile(buffer) {
-  const workbook = xlsx.read(buffer, { type: 'buffer' });
+  const workbook = xlsx.read(buffer, { type: 'buffer', cellFormula: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const data = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-  return data.flat().filter(cell => cell && String(cell).trim().length > 0);
+  const rows = readCellsFromSheet(sheet);
+  return rows.flat().filter(cell => cell.length > 0);
 }
 
 function readStoriesFile(buffer) {
-  const workbook = xlsx.read(buffer, { type: 'buffer' });
+  const workbook = xlsx.read(buffer, { type: 'buffer', cellFormula: false });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+  const rows = readCellsFromSheet(sheet);
 
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map(h => String(h || '').trim());
+  const headers = rows[0];
   const companyIdx = headers.findIndex(h => h === 'פלוגה' || h === 'Company');
   const storyIdx = headers.findIndex(h => h === 'סיפור' || h === 'Story' || h === 'סיפור/זיכרון');
 
   return rows.slice(1).map(row => ({
-    company: companyIdx >= 0 ? String(row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
-    story: storyIdx >= 0 ? String(row[storyIdx] || '') : ''
+    company: companyIdx >= 0 ? (row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
+    story: storyIdx >= 0 ? (row[storyIdx] || '') : ''
   })).filter(s => s.story.trim().length > 0);
 }
 
