@@ -140,21 +140,19 @@ function readStoriesFile(buffer) {
 function createExcelFile(words, questions, metadata) {
   const wb = xlsx.utils.book_new();
 
-  const basicCards = words.map((word, idx) => ({
-    'קלף #': idx + 1,
-    'מילה': word,
-    'קטגוריה': '(עיצוב בעיצובנית)'
-  }));
-  xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(basicCards), 'קלפים בסיסיים');
+  const basicAOA = [
+    ['קלף #', 'מילה', 'קטגוריה'],
+    ...words.map((word, idx) => [idx + 1, word, '(עיצוב בעיצובנית)'])
+  ];
+  xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(basicAOA), 'קלפים בסיסיים');
 
-  const storyCards = questions.map((q, idx) => ({
-    'קלף #': idx + 1,
-    'שאלה': q,
-    'פלוגה': metadata.companies[idx % metadata.companies.length] || 'מחולק'
-  }));
-  xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(storyCards), 'קלפי סיפור');
+  const storyAOA = [
+    ['קלף #', 'שאלה', 'פלוגה'],
+    ...questions.map((q, idx) => [idx + 1, q, metadata.companies[idx % metadata.companies.length] || 'מחולק'])
+  ];
+  xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(storyAOA), 'קלפי סיפור');
 
-  const metaData = [
+  const metaAOA = [
     ['שם המשחק:', metadata.gameName],
     ['סלוגן:', metadata.slogan],
     ['שם קלפי סיפור:', metadata.storyCardName],
@@ -163,10 +161,9 @@ function createExcelFile(words, questions, metadata) {
     ['כמות שאלות:', questions.length],
     ['כמות פלוגות:', metadata.companies.length],
     ['תאריך יצוא:', new Date().toLocaleDateString('he-IL')],
-    [''],
     ['קטגוריות (למידע בלבד):', metadata.categories.join(', ')]
   ];
-  xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(metaData, { header: 1 }), 'מטא-נתונים');
+  xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(metaAOA), 'מטא-נתונים');
 
   return xlsx.write(wb, { bookType: 'xlsx', type: 'buffer' });
 }
