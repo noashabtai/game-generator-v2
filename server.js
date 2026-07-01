@@ -16,23 +16,28 @@ app.use(express.static('public'));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// משתנה גלובלי לשמירת שם הקובץ האחרון
-let lastFilename = null;
+// מצב עיבוד גלובלי
+let processingState = {
+  status: 'idle', // idle / processing / done / error
+  error: null,
+  wordCount: 0,
+  storyCount: 0,
+  filename: null
+};
 
 // ==================== עיבוד הנתונים ====================
 
 async function generateMissingWords(categories, existingWords, totalWords = 800) {
-  try {
-    const missingCount = totalWords - existingWords.length;
-    
-    if (missingCount <= 0) {
-      return existingWords.slice(0, totalWords);
-    }
+  const missingCount = totalWords - existingWords.length;
 
-    const categoriesStr = categories.join(', ');
-    const wordsStr = existingWords.slice(0, 50).join(', ');
+  if (missingCount <= 0) {
+    return existingWords.slice(0, totalWords);
+  }
 
-    const prompt = `אתה עוזר ליצור מילים למשחק קופסה גדודי.
+  const categoriesStr = categories.join(', ');
+  const wordsStr = existingWords.slice(0, 50).join(', ');
+
+  const prompt = `אתה עוזר ליצור מילים למשחק קופסה גדודי.
 
 הקטגוריות הן: ${categoriesStr}
 
@@ -47,29 +52,24 @@ async function generateMissingWords(categories, existingWords, totalWords = 800)
 
 החזר רק רשימה של מילים, מופרדות בשורה חדשה. ללא מספורים, ללא הסברים.`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const result = await model.generateContent(prompt);
-    const generatedText = result.response.text();
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const result = await model.generateContent(prompt);
+  const generatedText = result.response.text();
 
-    const newWords = generatedText.split('\n')
-      .map(w => w.trim())
-      .filter(w => w.length > 0 && !existingWords.includes(w))
-      .slice(0, missingCount);
+  const newWords = generatedText.split('\n')
+    .map(w => w.trim())
+    .filter(w => w.length > 0 && !existingWords.includes(w))
+    .slice(0, missingCount);
 
-    return [...existingWords, ...newWords].slice(0, totalWords);
-  } catch (error) {
-    console.error('Error generating words:', error.message);
-    throw error;
-  }
+  return [...existingWords, ...newWords].slice(0, totalWords);
 }
 
 async function extractQuestionsFromStories(stories, numQuestions = 48) {
-  try {
-    const storiesText = stories
-      .map(s => `[${s.company}] ${s.story}`)
-      .join('\n\n');
+  const storiesText = stories
+    .map(s => `[${s.company}] ${s.story}`)
+    .join('\n\n');
 
-    const prompt = `אתה עוזר לחלץ שאלות משחק מסיפורים גדודיים.
+  const prompt = `אתה עוזר לחלץ שאלות משחק מסיפורים גדודיים.
 
 הסיפורים:
 ${storiesText}
@@ -83,157 +83,150 @@ ${storiesText}
 
 החזר רק רשימה של שאלות, מופרדות בשורה חדשה. ללא מספורים.`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-    const result = await model.generateContent(prompt);
-    const generatedText = result.response.text();
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+  const result = await model.generateContent(prompt);
+  const generatedText = result.response.text();
 
-    const questions = generatedText.split('\n')
-      .map(q => q.trim())
-      .filter(q => q.length > 0)
-      .slice(0, numQuestions);
-
-    return questions;
-  } catch (error) {
-    console.error('Error extracting questions:', error.message);
-    throw error;
-  }
+  return generatedText.split('\n')
+    .map(q => q.trim())
+    .filter(q => q.length > 0)
+    .slice(0, numQuestions);
 }
 
 // ==================== קריאת קבצים ====================
 
-function readExcelFile(buffer, sheetName = 0) {
-  try {
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[sheetName]];
-    const data = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
-    
-    return data.flat().filter(cell => cell && String(cell).trim().length > 0);
-  } catch (error) {
-    console.error('Error reading Excel:', error.message);
-    throw error;
-  }
+function readExcelFile(buffer) {
+  const workbook = xlsx.read(buffer, { type: 'buffer' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const data = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+  return data.flat().filter(cell => cell && String(cell).trim().length > 0);
 }
 
 function readStoriesFile(buffer) {
-  try {
-    const workbook = xlsx.read(buffer, { type: 'buffer' });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+  const workbook = xlsx.read(buffer, { type: 'buffer' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
 
-    if (rows.length < 2) return [];
+  if (rows.length < 2) return [];
 
-    const headers = rows[0].map(h => String(h || '').trim());
-    const companyIdx = headers.findIndex(h => h === 'פלוגה' || h === 'Company');
-    const storyIdx = headers.findIndex(h => h === 'סיפור' || h === 'Story' || h === 'סיפור/זיכרון');
+  const headers = rows[0].map(h => String(h || '').trim());
+  const companyIdx = headers.findIndex(h => h === 'פלוגה' || h === 'Company');
+  const storyIdx = headers.findIndex(h => h === 'סיפור' || h === 'Story' || h === 'סיפור/זיכרון');
 
-    return rows.slice(1).map(row => ({
-      company: companyIdx >= 0 ? String(row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
-      story: storyIdx >= 0 ? String(row[storyIdx] || '') : ''
-    })).filter(s => s.story.trim().length > 0);
-  } catch (error) {
-    console.error('Error reading stories:', error.message);
-    throw error;
-  }
+  return rows.slice(1).map(row => ({
+    company: companyIdx >= 0 ? String(row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
+    story: storyIdx >= 0 ? String(row[storyIdx] || '') : ''
+  })).filter(s => s.story.trim().length > 0);
 }
 
 // ==================== יצוא Excel ====================
 
 function createExcelFile(words, questions, metadata) {
-  try {
-    const wb = xlsx.utils.book_new();
+  const wb = xlsx.utils.book_new();
 
-    // גיליון 1: קלפים בסיסיים
-    const basicCards = words.map((word, idx) => ({
-      'קלף #': idx + 1,
-      'מילה': word,
-      'קטגוריה': '(עיצוב בעיצובנית)'
-    }));
-    const ws1 = xlsx.utils.json_to_sheet(basicCards);
-    xlsx.utils.book_append_sheet(wb, ws1, 'קלפים בסיסיים');
+  const basicCards = words.map((word, idx) => ({
+    'קלף #': idx + 1,
+    'מילה': word,
+    'קטגוריה': '(עיצוב בעיצובנית)'
+  }));
+  xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(basicCards), 'קלפים בסיסיים');
 
-    // גיליון 2: קלפי סיפור
-    const storyCards = questions.map((q, idx) => ({
-      'קלף #': idx + 1,
-      'שאלה': q,
-      'פלוגה': metadata.companies[idx % metadata.companies.length] || 'מחולק'
-    }));
-    const ws2 = xlsx.utils.json_to_sheet(storyCards);
-    xlsx.utils.book_append_sheet(wb, ws2, 'קלפי סיפור');
+  const storyCards = questions.map((q, idx) => ({
+    'קלף #': idx + 1,
+    'שאלה': q,
+    'פלוגה': metadata.companies[idx % metadata.companies.length] || 'מחולק'
+  }));
+  xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(storyCards), 'קלפי סיפור');
 
-    // גיליון 3: מטא-נתונים
-    const metaData = [
-      ['שם המשחק:', metadata.gameName],
-      ['סלוגן:', metadata.slogan],
-      ['שם קלפי סיפור:', metadata.storyCardName],
-      ['שם קלפי אזרחות:', metadata.civilianCardName],
-      ['כמות מילים סה״כ:', words.length],
-      ['כמות שאלות:', questions.length],
-      ['כמות פלוגות:', metadata.companies.length],
-      ['תאריך יצוא:', new Date().toLocaleDateString('he-IL')],
-      [''],
-      ['קטגוריות (למידע בלבד):', metadata.categories.join(', ')]
-    ];
-    const ws3 = xlsx.utils.json_to_sheet(metaData, { header: 1 });
-    xlsx.utils.book_append_sheet(wb, ws3, 'מטא-נתונים');
+  const metaData = [
+    ['שם המשחק:', metadata.gameName],
+    ['סלוגן:', metadata.slogan],
+    ['שם קלפי סיפור:', metadata.storyCardName],
+    ['שם קלפי אזרחות:', metadata.civilianCardName],
+    ['כמות מילים סה״כ:', words.length],
+    ['כמות שאלות:', questions.length],
+    ['כמות פלוגות:', metadata.companies.length],
+    ['תאריך יצוא:', new Date().toLocaleDateString('he-IL')],
+    [''],
+    ['קטגוריות (למידע בלבד):', metadata.categories.join(', ')]
+  ];
+  xlsx.utils.book_append_sheet(wb, xlsx.utils.json_to_sheet(metaData, { header: 1 }), 'מטא-נתונים');
 
-    return xlsx.write(wb, { bookType: 'xlsx', type: 'buffer' });
-  } catch (error) {
-    console.error('Error creating Excel:', error.message);
-    throw error;
-  }
+  return xlsx.write(wb, { bookType: 'xlsx', type: 'buffer' });
 }
 
 // ==================== API Routes ====================
 
-// עיבוד קבצים
+// התחלת עיבוד - מחזיר מיד ועובד ברקע
 app.post('/api/process', upload.fields([
   { name: 'wordsFile', maxCount: 1 },
   { name: 'storiesFile', maxCount: 1 }
-]), async (req, res) => {
+]), (req, res) => {
   try {
-    const { gameName, slogan, storyCardName, civilianCardName, categories, companies } = req.body;
+    if (processingState.status === 'processing') {
+      return res.json({ status: 'processing' });
+    }
 
+    const { gameName, slogan, storyCardName, civilianCardName, categories, companies } = req.body;
     const categoriesList = JSON.parse(categories || '[]');
     const companiesList = JSON.parse(companies || '[]');
 
     let words = [];
     let stories = [];
 
-    if (req.files.wordsFile) {
-      words = readExcelFile(req.files.wordsFile[0].buffer);
+    try {
+      if (req.files.wordsFile) {
+        words = readExcelFile(req.files.wordsFile[0].buffer);
+      }
+    } catch (e) {
+      console.error('Error reading words file:', e.message);
     }
 
-    if (req.files.storiesFile) {
-      stories = readStoriesFile(req.files.storiesFile[0].buffer);
+    try {
+      if (req.files.storiesFile) {
+        stories = readStoriesFile(req.files.storiesFile[0].buffer);
+      }
+    } catch (e) {
+      console.error('Error reading stories file:', e.message);
     }
 
-    console.log('🤖 Gemini עובד על המילים...');
-    const allWords = await generateMissingWords(categoriesList, words, 800);
+    processingState = { status: 'processing', error: null, wordCount: 0, storyCount: 0, filename: null };
 
-    console.log('🤖 Gemini עובד על השאלות...');
-    const allQuestions = await extractQuestionsFromStories(stories, 48);
+    // מחזיר מיד — לא מחכה לסיום
+    res.json({ status: 'processing' });
 
-    console.log('📊 יוצר Excel...');
-    const excelBuffer = createExcelFile(allWords, allQuestions, {
-      gameName,
-      slogan,
-      storyCardName,
-      civilianCardName,
-      categories: categoriesList,
-      companies: companiesList
-    });
+    // עיבוד ברקע
+    (async () => {
+      try {
+        console.log('🤖 Gemini עובד על המילים...');
+        const allWords = await generateMissingWords(categoriesList, words, 800);
 
-    const filename = `game-${Date.now()}.xlsx`;
-    fs.writeFileSync(`/tmp/${filename}`, excelBuffer);
-    lastFilename = filename;
+        console.log('🤖 Gemini עובד על השאלות...');
+        const allQuestions = await extractQuestionsFromStories(stories, 48);
 
-    console.log(`✅ קובץ יצוא: ${filename}`);
+        console.log('📊 יוצר Excel...');
+        const excelBuffer = createExcelFile(allWords, allQuestions, {
+          gameName, slogan, storyCardName, civilianCardName,
+          categories: categoriesList, companies: companiesList
+        });
 
-    res.json({
-      status: 'done',
-      wordCount: allWords.length,
-      storyCount: stories.length
-    });
+        const filename = `game-${Date.now()}.xlsx`;
+        fs.writeFileSync(`/tmp/${filename}`, excelBuffer);
+
+        processingState = {
+          status: 'done',
+          error: null,
+          wordCount: allWords.length,
+          storyCount: stories.length,
+          filename
+        };
+
+        console.log(`✅ קובץ מוכן: ${filename}`);
+      } catch (error) {
+        console.error('Processing error:', error.message);
+        processingState = { status: 'error', error: error.message, wordCount: 0, storyCount: 0, filename: null };
+      }
+    })();
 
   } catch (error) {
     console.error('API error:', error);
@@ -241,30 +234,28 @@ app.post('/api/process', upload.fields([
   }
 });
 
-// הורדת קובץ - גרסה מתוקנת
-app.get('/api/download/latest', (req, res) => {
-  try {
-    if (!lastFilename) {
-      return res.status(404).json({ error: 'קובץ לא נמצא. אנא העלו קבצים תחילה.' });
-    }
+// בדיקת סטטוס עיבוד
+app.get('/api/status', (req, res) => {
+  res.json(processingState);
+});
 
-    const filepath = path.join('/tmp', lastFilename);
-
-    if (!fs.existsSync(filepath)) {
-      return res.status(404).json({ error: 'קובץ לא זמין. אנא נסו שוב.' });
-    }
-
-    res.download(filepath, `game-${Date.now()}.xlsx`, () => {
-      try {
-        fs.unlinkSync(filepath);
-        lastFilename = null;
-      } catch (e) {
-        console.error('Error deleting file:', e);
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+// הורדת קובץ
+app.get('/api/download/latest', (_req, res) => {
+  if (!processingState.filename) {
+    return res.status(404).json({ error: 'קובץ לא נמצא.' });
   }
+
+  const filepath = path.join('/tmp', processingState.filename);
+
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'קובץ לא זמין.' });
+  }
+
+  const downloadName = `game-${Date.now()}.xlsx`;
+  res.download(filepath, downloadName, () => {
+    try { fs.unlinkSync(filepath); } catch (e) {}
+    processingState = { status: 'idle', error: null, wordCount: 0, storyCount: 0, filename: null };
+  });
 });
 
 // ==================== Start Server ====================

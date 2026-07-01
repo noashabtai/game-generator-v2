@@ -579,15 +579,53 @@
         }
 
         // ==================== שליחה ====================
+        let pollingInterval = null;
+
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+
+        async function pollStatus(btn, status) {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+
+                if (data.status === 'done') {
+                    stopPolling();
+                    btn.disabled = false;
+
+                    document.getElementById('wordCount').textContent = data.wordCount;
+                    document.getElementById('storyCount').textContent = data.storyCount;
+                    document.getElementById('stats').style.display = 'grid';
+
+                    status.className = 'status show success';
+                    status.innerHTML = '✅ הקובץ מוכן! <a href="/api/download/latest" download>הורדו את הקובץ</a>';
+
+                } else if (data.status === 'error') {
+                    stopPolling();
+                    btn.disabled = false;
+                    status.className = 'status show error';
+                    status.innerHTML = `❌ ${data.error}`;
+                }
+                // אם status === 'processing' — ממשיכים לחכות
+            } catch (e) {
+                // שגיאת רשת זמנית — ממשיכים לנסות
+            }
+        }
+
         document.getElementById('gameForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            stopPolling();
 
             const btn = document.getElementById('submitBtn');
             const status = document.getElementById('status');
 
             btn.disabled = true;
             status.className = 'status show processing';
-            status.innerHTML = '<span class="spinner"></span> מעבד נתונים, אנא המתינו...';
+            status.innerHTML = '<span class="spinner"></span> שולח נתונים...';
 
             try {
                 const formData = new FormData();
@@ -596,20 +634,17 @@
                 formData.append('storyCardName', document.getElementById('storyCardName').value);
                 formData.append('civilianCardName', document.getElementById('civilianCardName').value);
 
-                // קטגוריות
                 const categories = Array.from(categoriesContainer.querySelectorAll('input'))
                     .map(inp => inp.value)
                     .filter(val => val);
                 formData.append('categories', JSON.stringify(categories));
 
-                // פלוגות
                 const companies = document.getElementById('companiesInput').value
                     .split(',')
                     .map(c => c.trim())
                     .filter(c => c);
                 formData.append('companies', JSON.stringify(companies));
 
-                // קבצים
                 const wordsFile = document.getElementById('wordsFile').files[0];
                 const storiesFile = document.getElementById('storiesFile').files[0];
 
@@ -620,7 +655,6 @@
                 formData.append('wordsFile', wordsFile);
                 formData.append('storiesFile', storiesFile);
 
-                // שליחה
                 const response = await fetch('/api/process', {
                     method: 'POST',
                     body: formData
@@ -628,22 +662,18 @@
 
                 const data = await response.json();
 
-                if (response.ok && data.status === 'done') {
-                    // הצגת סטטיסטיקות
-                    document.getElementById('wordCount').textContent = data.wordCount;
-                    document.getElementById('storyCount').textContent = data.storyCount;
-                    document.getElementById('stats').style.display = 'grid';
-
-                    status.className = 'status show success';
-                    status.innerHTML = '✅ הקובץ מוכן! <a href="/api/download/latest" download>הורדו את הקובץ</a>';
-                } else {
-                    throw new Error(data.error || 'שגיאה בעיבוד');
+                if (!response.ok) {
+                    throw new Error(data.error || 'שגיאה בשליחה');
                 }
+
+                // עיבוד התחיל — מתחילים polling
+                status.innerHTML = '<span class="spinner"></span> מעבד נתונים עם AI — זה לוקח כמה דקות...';
+                pollingInterval = setInterval(() => pollStatus(btn, status), 4000);
+
             } catch (error) {
+                btn.disabled = false;
                 status.className = 'status show error';
                 status.innerHTML = `❌ ${error.message}`;
-            } finally {
-                btn.disabled = false;
             }
         });
 
