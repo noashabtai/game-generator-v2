@@ -118,11 +118,17 @@ function readStoriesFile(buffer) {
   try {
     const workbook = xlsx.read(buffer, { type: 'buffer' });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = xlsx.utils.sheet_to_json(sheet);
-    
-    return data.map(row => ({
-      company: row['פלוגה'] || row['Company'] || 'לא מוגדר',
-      story: row['סיפור'] || row['Story'] || row['סיפור/זיכרון'] || ''
+    const rows = xlsx.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+
+    if (rows.length < 2) return [];
+
+    const headers = rows[0].map(h => String(h || '').trim());
+    const companyIdx = headers.findIndex(h => h === 'פלוגה' || h === 'Company');
+    const storyIdx = headers.findIndex(h => h === 'סיפור' || h === 'Story' || h === 'סיפור/זיכרון');
+
+    return rows.slice(1).map(row => ({
+      company: companyIdx >= 0 ? String(row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
+      story: storyIdx >= 0 ? String(row[storyIdx] || '') : ''
     })).filter(s => s.story.trim().length > 0);
   } catch (error) {
     console.error('Error reading stories:', error.message);
