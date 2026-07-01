@@ -597,7 +597,12 @@
 
                 const data = await response.json();
 
-                if (response.ok) {
+                if (response.ok && data.status === 'done') {
+                    // הצגת סטטיסטיקות
+                    document.getElementById('wordCount').textContent = data.wordCount;
+                    document.getElementById('storyCount').textContent = data.storyCount;
+                    document.getElementById('stats').style.display = 'grid';
+
                     status.className = 'status show success';
                     status.innerHTML = '✅ הקובץ מוכן! <a href="/api/download/latest" download>הורדו Excel</a>';
                 } else {

@@ -16,6 +16,9 @@ app.use(express.static('public'));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// משתנה גלובלי לשמירת שם הקובץ האחרון
+let lastFilename = null;
+
 // ==================== עיבוד הנתונים ====================
 
 async function generateMissingWords(categories, existingWords, totalWords = 800) {
@@ -198,39 +201,33 @@ app.post('/api/process', upload.fields([
       stories = readStoriesFile(req.files.storiesFile[0].buffer);
     }
 
-    res.json({
-      status: 'processing',
-      message: `קיבלתי ${words.length} מילים ו-${stories.length} סיפורים. מעבדתי...`,
-      progress: 'generating'
+    console.log('🤖 Gemini עובד על המילים...');
+    const allWords = await generateMissingWords(categoriesList, words, 800);
+
+    console.log('🤖 Gemini עובד על השאלות...');
+    const allQuestions = await extractQuestionsFromStories(stories, 48);
+
+    console.log('📊 יוצר Excel...');
+    const excelBuffer = createExcelFile(allWords, allQuestions, {
+      gameName,
+      slogan,
+      storyCardName,
+      civilianCardName,
+      categories: categoriesList,
+      companies: companiesList
     });
 
-    // עיבוד בריקע
-    setTimeout(async () => {
-      try {
-        console.log('🤖 Gemini עובד על המילים...');
-        const allWords = await generateMissingWords(categoriesList, words, 800);
+    const filename = `game-${Date.now()}.xlsx`;
+    fs.writeFileSync(`/tmp/${filename}`, excelBuffer);
+    lastFilename = filename;
 
-        console.log('🤖 Gemini עובד על השאלות...');
-        const allQuestions = await extractQuestionsFromStories(stories, 48);
+    console.log(`✅ קובץ יצוא: ${filename}`);
 
-        console.log('📊 יוצר Excel...');
-        const excelBuffer = createExcelFile(allWords, allQuestions, {
-          gameName,
-          slogan,
-          storyCardName,
-          civilianCardName,
-          categories: categoriesList,
-          companies: companiesList
-        });
-
-        const filename = `game-${Date.now()}.xlsx`;
-        fs.writeFileSync(`/tmp/${filename}`, excelBuffer);
-
-        console.log(`✅ קובץ יצוא: ${filename}`);
-      } catch (error) {
-        console.error('Processing error:', error);
-      }
-    }, 0);
+    res.json({
+      status: 'done',
+      wordCount: allWords.length,
+      storyCount: stories.length
+    });
 
   } catch (error) {
     console.error('API error:', error);
@@ -238,18 +235,26 @@ app.post('/api/process', upload.fields([
   }
 });
 
-// הורדת קובץ
-app.get('/api/download/:filename', (req, res) => {
+// הורדת קובץ - גרסה מתוקנת
+app.get('/api/download/latest', (req, res) => {
   try {
-    const filename = req.params.filename;
-    const filepath = path.join('/tmp', filename);
-
-    if (!fs.existsSync(filepath)) {
-      return res.status(404).json({ error: 'קובץ לא נמצא' });
+    if (!lastFilename) {
+      return res.status(404).json({ error: 'קובץ לא נמצא. אנא העלו קבצים תחילה.' });
     }
 
-    res.download(filepath, `game-generator-${Date.now()}.xlsx`, () => {
-      fs.unlinkSync(filepath);
+    const filepath = path.join('/tmp', lastFilename);
+
+    if (!fs.existsSync(filepath)) {
+      return res.status(404).json({ error: 'קובץ לא זמין. אנא נסו שוב.' });
+    }
+
+    res.download(filepath, `game-${Date.now()}.xlsx`, () => {
+      try {
+        fs.unlinkSync(filepath);
+        lastFilename = null;
+      } catch (e) {
+        console.error('Error deleting file:', e);
+      }
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
