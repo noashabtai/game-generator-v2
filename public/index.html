@@ -377,6 +377,118 @@
             color: #888;
             margin-top: 4px;
         }
+
+        /* ==================== תצוגה מקדימה של קלפים ==================== */
+        .cards-preview {
+            display: none;
+            margin-top: 28px;
+        }
+
+        .cards-preview.show {
+            display: block;
+        }
+
+        .cards-preview-title {
+            font-size: 0.9em;
+            color: #999;
+            text-align: center;
+            margin-bottom: 16px;
+            letter-spacing: 0.5px;
+        }
+
+        .cards-row {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        /* קלף בסיסי — ירוק כהה עם רשימת מילים */
+        .card-basic {
+            width: 160px;
+            min-height: 200px;
+            background: #4a5e38;
+            border-radius: 10px;
+            padding: 18px 14px;
+            color: white;
+            font-family: 'Heebo', sans-serif;
+            direction: rtl;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+        }
+
+        .card-basic ol {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .card-basic ol li {
+            font-size: 0.82em;
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.12);
+            display: flex;
+            gap: 6px;
+        }
+
+        .card-basic ol li:last-child {
+            border-bottom: none;
+        }
+
+        .card-basic ol li .num {
+            opacity: 0.6;
+            font-size: 0.85em;
+        }
+
+        /* קלף פלוגה — בז׳/קרם עם שאלה גדודית */
+        .card-unit {
+            width: 160px;
+            min-height: 200px;
+            background: #f5eed8;
+            border-radius: 10px;
+            padding: 20px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            direction: rtl;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+        }
+
+        .card-unit p {
+            font-size: 0.92em;
+            color: #3a4e28;
+            line-height: 1.6;
+            font-weight: 500;
+        }
+
+        /* קלף אזרחות — תכלת/אפור-כחול עם שאלה אזרחית */
+        .card-civilian {
+            width: 160px;
+            min-height: 200px;
+            background: #dce8f0;
+            border-radius: 10px;
+            padding: 20px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            direction: rtl;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+        }
+
+        .card-civilian p {
+            font-size: 0.92em;
+            color: #3a5060;
+            line-height: 1.6;
+            font-weight: 500;
+        }
+
+        .card-label {
+            text-align: center;
+            font-size: 0.78em;
+            color: #aaa;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -485,6 +597,31 @@
 
                     <div class="status" id="status"></div>
 
+                    <!-- תצוגה מקדימה של קלפים -->
+                    <div class="cards-preview" id="cardsPreview">
+                        <div class="cards-preview-title">תצוגה מקדימה — דוגמה לקלפים שייצאו</div>
+                        <div class="cards-row">
+                            <div>
+                                <div class="card-basic">
+                                    <ol id="previewWordsList"></ol>
+                                </div>
+                                <div class="card-label">קלף בסיסי</div>
+                            </div>
+                            <div>
+                                <div class="card-unit">
+                                    <p id="previewMilitaryQ">שאלה גדודית תופיע כאן</p>
+                                </div>
+                                <div class="card-label">קלף פלוגה</div>
+                            </div>
+                            <div>
+                                <div class="card-civilian">
+                                    <p id="previewCivilianQ">שאלה אזרחית תופיע כאן</p>
+                                </div>
+                                <div class="card-label">קלף אזרחות</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="button-group">
                         <button type="submit" class="btn-primary" id="submitBtn">
                             עבדו את הנתונים
@@ -543,11 +680,25 @@
                 const sheet = wb.Sheets[wb.SheetNames[0]];
                 const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
                 if (rows.length > 0) {
+                    // מילוי שמות קטגוריות
                     const headers = rows[0].map(h => String(h || '').trim()).filter(h => h);
                     const inputs = categoriesContainer.querySelectorAll('input');
                     inputs.forEach((input, idx) => {
                         if (headers[idx]) input.value = headers[idx];
                     });
+
+                    // תצוגה מקדימה — 8 מילים מהעמודה הראשונה
+                    const firstColWords = rows.slice(1)
+                        .map(r => String(r[0] || '').trim())
+                        .filter(w => w)
+                        .slice(0, 8);
+                    if (firstColWords.length > 0) {
+                        const list = document.getElementById('previewWordsList');
+                        list.innerHTML = firstColWords.map((w, i) =>
+                            `<li><span class="num">${i + 1}.</span> ${w}</li>`
+                        ).join('');
+                        document.getElementById('cardsPreview').classList.add('show');
+                    }
                 }
             } catch (err) {
                 console.error('שגיאה בקריאת קטגוריות:', err);
@@ -617,6 +768,21 @@
 
                     status.className = 'status show success';
                     status.innerHTML = '✅ הקובץ מוכן! <a href="/api/download/latest" download>הורדו את הקובץ</a>';
+
+                    // תצוגה מקדימה של קלפים
+                    if (data.sampleWords && data.sampleWords.length > 0) {
+                        const list = document.getElementById('previewWordsList');
+                        list.innerHTML = data.sampleWords.map((w, i) =>
+                            `<li><span class="num">${i + 1}.</span> ${w}</li>`
+                        ).join('');
+                    }
+                    if (data.sampleMilitaryQuestion) {
+                        document.getElementById('previewMilitaryQ').textContent = data.sampleMilitaryQuestion;
+                    }
+                    if (data.sampleCivilianQuestion) {
+                        document.getElementById('previewCivilianQ').textContent = data.sampleCivilianQuestion;
+                    }
+                    document.getElementById('cardsPreview').classList.add('show');
 
                 } else if (data.status === 'error') {
                     stopPolling();

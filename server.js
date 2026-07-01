@@ -22,7 +22,10 @@ let processingState = {
   error: null,
   wordCount: 0,
   storyCount: 0,
-  filename: null
+  filename: null,
+  sampleWords: [],
+  sampleMilitaryQuestion: null,
+  sampleCivilianQuestion: null
 };
 
 // ==================== עיבוד הנתונים ====================
@@ -299,12 +302,19 @@ app.post('/api/process', upload.fields([
 
         const totalWords = Object.values(categoryWords).reduce((sum, arr) => sum + arr.length, 0);
 
+        // דגימת מילים מהקטגוריה הראשונה לתצוגה מקדימה
+        const firstCat = Object.keys(categoryWords)[0];
+        const sampleWords = firstCat ? categoryWords[firstCat].slice(0, 8) : [];
+
         processingState = {
           status: 'done',
           error: null,
           wordCount: totalWords,
           storyCount: stories.military.length + stories.civilian.length,
-          filename
+          filename,
+          sampleWords,
+          sampleMilitaryQuestion: militaryQuestions[0] || null,
+          sampleCivilianQuestion: civilianQuestions[0] || null
         };
 
         console.log(`✅ קובץ מוכן: ${filename}`);
