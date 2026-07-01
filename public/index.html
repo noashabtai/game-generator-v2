@@ -530,12 +530,27 @@
             document.getElementById('storiesFile').click();
         });
 
-        document.getElementById('wordsFile').addEventListener('change', (e) => {
+        document.getElementById('wordsFile').addEventListener('change', async (e) => {
             const file = e.target.files[0];
-            if (file) {
-                document.getElementById('wordsStatus').textContent = `✅ ${file.name}`;
-                document.getElementById('wordsStatus').className = 'file-status success';
-                document.getElementById('wordsUpload').classList.add('uploaded');
+            if (!file) return;
+            document.getElementById('wordsStatus').textContent = `✅ ${file.name}`;
+            document.getElementById('wordsStatus').className = 'file-status success';
+            document.getElementById('wordsUpload').classList.add('uploaded');
+
+            try {
+                const buffer = await file.arrayBuffer();
+                const wb = XLSX.read(buffer, { type: 'array' });
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                if (rows.length > 0) {
+                    const headers = rows[0].map(h => String(h || '').trim()).filter(h => h);
+                    const inputs = categoriesContainer.querySelectorAll('input');
+                    inputs.forEach((input, idx) => {
+                        if (headers[idx]) input.value = headers[idx];
+                    });
+                }
+            } catch (err) {
+                console.error('שגיאה בקריאת קטגוריות:', err);
             }
         });
 
@@ -700,5 +715,6 @@
             });
         });
     </script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </body>
 </html>
