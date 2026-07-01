@@ -63,17 +63,24 @@ async function completeCategoryWords(categoryName, existingWords, targetCount = 
   return [...existingWords, ...newWords].slice(0, targetCount);
 }
 
-async function extractQuestionsFromStories(stories, numQuestions = 48) {
-  const storiesText = stories
-    .map(s => `[${s.company}] ${s.story}`)
-    .join('\n\n');
+async function extractQuestionsFromStories(stories, numQuestions = 24, type = 'military') {
+  const isMilitary = type === 'military';
+  const hasStories = stories.length > 0;
 
-  const prompt = `אתה עוזר לחלץ שאלות משחק מסיפורים גדודיים.
+  const typeDescription = isMilitary
+    ? 'שאלות על חיי הגדוד, רגעים בשירות, ניסיון צבאי משותף'
+    : 'שאלות על החיים האזרחיים, הבית, המשפחה, שגרת החיים לפני/אחרי הצבא';
+
+  let prompt;
+  if (hasStories) {
+    const storiesText = stories.map(s => `[${s.company}] ${s.story}`).join('\n\n');
+    prompt = `אתה עוזר לחלץ שאלות משחק מסיפורים.
 
 הסיפורים:
 ${storiesText}
 
 צור לי ${numQuestions} שאלות/משימות קצרות בנוסח "ספרו לנו..." או "תסביר לי..." שמתוך הסיפורים האלה.
+הנושא: ${typeDescription}
 השאלות צריכות להיות:
 - קצרות (עד 10 מילים כל אחת)
 - מעוררות סיפור וזיכרון
@@ -81,6 +88,17 @@ ${storiesText}
 - מגוונות
 
 החזר רק רשימה של שאלות, מופרדות בשורה חדשה. ללא מספורים.`;
+  } else {
+    prompt = `אתה עוזר ליצור שאלות למשחק קופסה גדודי.
+
+צור לי ${numQuestions} שאלות/משימות קצרות בנוסח "ספרו לנו..." או "תסביר לי..." בנושא: ${typeDescription}
+השאלות צריכות להיות:
+- קצרות (עד 10 מילים כל אחת)
+- מעוררות סיפור וזיכרון
+- מגוונות
+
+החזר רק רשימה של שאלות, מופרדות בשורה חדשה. ללא מספורים.`;
+  }
 
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   const result = await model.generateContent(prompt);
@@ -134,19 +152,27 @@ function readWordsFileByCategory(buffer) {
 
 function readStoriesFile(buffer) {
   const workbook = xlsx.read(buffer, { type: 'buffer', cellFormula: false });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = readCellsFromSheet(sheet);
 
-  if (rows.length < 2) return [];
+  function parseSheet(sheet) {
+    if (!sheet) return [];
+    const rows = readCellsFromSheet(sheet);
+    if (rows.length < 2) return [];
+    const headers = rows[0];
+    const companyIdx = headers.findIndex(h => h === 'פלוגה' || h === 'Company');
+    const storyIdx = headers.findIndex(h => h === 'סיפור' || h === 'Story' || h === 'סיפור/זיכרון');
+    return rows.slice(1).map(row => ({
+      company: companyIdx >= 0 ? (row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
+      story: storyIdx >= 0 ? (row[storyIdx] || '') : ''
+    })).filter(s => s.story.trim().length > 0);
+  }
 
-  const headers = rows[0];
-  const companyIdx = headers.findIndex(h => h === 'פלוגה' || h === 'Company');
-  const storyIdx = headers.findIndex(h => h === 'סיפור' || h === 'Story' || h === 'סיפור/זיכרון');
+  const sheet1 = workbook.Sheets[workbook.SheetNames[0]];
+  const sheet2 = workbook.SheetNames[1] ? workbook.Sheets[workbook.SheetNames[1]] : null;
 
-  return rows.slice(1).map(row => ({
-    company: companyIdx >= 0 ? (row[companyIdx] || 'לא מוגדר') : 'לא מוגדר',
-    story: storyIdx >= 0 ? (row[storyIdx] || '') : ''
-  })).filter(s => s.story.trim().length > 0);
+  return {
+    military: parseSheet(sheet1),
+    civilian: parseSheet(sheet2)
+  };
 }
 
 // ==================== יצוא Excel ====================
@@ -165,10 +191,15 @@ function createExcelFile(categoryWords, questions, metadata) {
   }
   xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(basicAOA), 'קלפים בסיסיים');
 
-  // גיליון קלפי סיפור
+  // גיליון קלפי סיפור — עם עמודת סוג (גדודי/אזרחי)
   const storyAOA = [
-    ['קלף #', 'שאלה', 'פלוגה'],
-    ...questions.map((q, idx) => [idx + 1, q, metadata.companies[idx % metadata.companies.length] || 'מחולק'])
+    ['קלף #', 'שאלה', 'פלוגה', 'סוג'],
+    ...questions.map((q, idx) => [
+      idx + 1,
+      q.text,
+      metadata.companies[idx % metadata.companies.length] || 'מחולק',
+      q.type
+    ])
   ];
   xlsx.utils.book_append_sheet(wb, xlsx.utils.aoa_to_sheet(storyAOA), 'קלפי סיפור');
 
@@ -206,7 +237,7 @@ app.post('/api/process', upload.fields([
     const companiesList = JSON.parse(companies || '[]');
 
     let wordsByCategory = {};
-    let stories = [];
+    let stories = { military: [], civilian: [] };
 
     try {
       if (req.files.wordsFile) {
@@ -246,8 +277,16 @@ app.post('/api/process', upload.fields([
           categoryWords[catName] = await completeCategoryWords(catName, existingWords, 100);
         }
 
-        console.log('🤖 Gemini עובד על השאלות...');
-        const allQuestions = await extractQuestionsFromStories(stories, 48);
+        console.log('🤖 Gemini עובד על שאלות גדודיות...');
+        const militaryQuestions = await extractQuestionsFromStories(stories.military, 24, 'military');
+
+        console.log('🤖 Gemini עובד על שאלות אזרחיות...');
+        const civilianQuestions = await extractQuestionsFromStories(stories.civilian, 24, 'civilian');
+
+        const allQuestions = [
+          ...militaryQuestions.map(q => ({ text: q, type: 'גדודי' })),
+          ...civilianQuestions.map(q => ({ text: q, type: 'אזרחי' }))
+        ];
 
         console.log('📊 יוצר Excel...');
         const excelBuffer = createExcelFile(categoryWords, allQuestions, {
@@ -264,7 +303,7 @@ app.post('/api/process', upload.fields([
           status: 'done',
           error: null,
           wordCount: totalWords,
-          storyCount: stories.length,
+          storyCount: stories.military.length + stories.civilian.length,
           filename
         };
 
